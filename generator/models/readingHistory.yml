@@ -1,0 +1,64 @@
+type: object
+
+key:
+  data:
+    build: `${this._type}:${this.readingId}`
+
+data:
+  count: 1000
+
+properties:
+  readingId:
+    data:
+      build: faker.random.uuid()
+  activityId:
+    data:
+      build: |
+        chance.integer({ min: 0, max: 10 })
+  assetId:
+    data:
+      build: |
+        chance.integer({ min: 1, max: 10000000 })
+  companyId:
+    data:
+      build: |
+        chance.integer({ min: 1, max: 100 })
+  insertionTime:
+    data:
+      build: faker.date.between('2022-01-01T00:00:00.000Z', '2023-04-01T00:00:00.000Z').getTime()
+  originalTime:
+    data:
+      build: faker.date.recent(1, this.insertionTime).getTime()
+  requestTime:
+    data:
+      build: faker.date.recent(1, this.insertionTime).getTime()
+  sensorStatus:
+    data:
+      build: |
+        chance.integer({ min: 1, max: 10 })
+  velocity:
+    data:
+      build: |
+        chance.integer({ min: 1, max: 10 })
+  weight:
+    data:
+      build: |
+        chance.integer({ min: 1000, max: 50000 })
+  location:
+    type: object
+    properties:
+      lat:
+        type: float
+        data:
+          build: | 
+            chance.floating({ min: 16, max: 32, fixed: 7 })
+      lon:
+        type: float
+        data:
+          build: |
+            chance.floating({ min: 37, max: 55, fixed: 7 })
+  _type:
+    data:
+      value: "ReadingHistory"
+  
+  
