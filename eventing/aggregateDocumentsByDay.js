@@ -1,9 +1,3 @@
-// Define the maximum number of documents that can be aggregated into a single document
-const MAX_DOCS_PER_AGGREGATE = 50000;
-
-const dst_collection = [];
-const metadata_collection = [];
-
 function OnUpdate(doc, meta) {
     // Check if the document contains an "insertionDate" property
     if (!doc.insertionTime) {
@@ -18,6 +12,12 @@ function OnUpdate(doc, meta) {
     const day = date.getUTCDate().toString().padStart(2, "0");
     const dateString = `${year}-${month}-${day}`;
     log(`Processing document with date: ${dateString}`)
+
+    // Flatten the document
+    let flattenedDoc = flattenObject(doc, {}, /type/);
+
+    // Get the keys from the flattened document to use as headers
+    const headers = Object.keys(flattenedDoc);
 
     // Use of distributed atomic counters to increment docCount
     const docCounter = {"id": dateString};
@@ -34,13 +34,39 @@ function OnUpdate(doc, meta) {
     const chunkNumber = Math.floor(count / MAX_DOCS_PER_AGGREGATE);
     const chunkId = `${dateString}-${chunkNumber}`;
 
-    // Split per-day documents into multiple chunks if the number of documents exceeds MAX_DOCS_PER_AGGREGATE
-    let aggregatedDoc = dst_collection[chunkId];
-    if (!aggregatedDoc) {
+    // Create the document with headers if not already exists
+    let aggregatedCsv = dst_collection[chunkId];
+    if (!aggregatedCsv) {
         log(`Creating new document with ID: ${chunkId}`);
-        aggregatedDoc = [];
+        aggregatedCsv = headers.join(",");
     }
-    aggregatedDoc.push(doc);
-    dst_collection[chunkId] = aggregatedDoc;
+
+    // Convert the flattened document to a CSV line and append it to aggregated document
+    var row = [];
+    for (var i = 0; i < headers.length; i++) {
+        row.push(flattenedDoc[headers[i]]);
+    }
+    let csvDoc = row.join(",");
+    aggregatedCsv = aggregatedCsv + '\n' + csvDoc;
+
+    // Save aggregated document
+    dst_collection[chunkId] = aggregatedCsv;
     log(`Added document to ${chunkId}`);
+}
+
+// Recursive function to flatten a nested object
+function flattenObject(obj, result, ignorePattern) {
+    for (var key in obj) {
+        if (ignorePattern && key.match(ignorePattern)) {
+            continue;
+        }
+
+        if (typeof obj[key] === "object" && !Array.isArray(obj[key])) {
+            flattenObject(obj[key], result, ignorePattern);
+        } else {
+            result[key] = obj[key];
+        }
+    }
+
+    return result;
 }
