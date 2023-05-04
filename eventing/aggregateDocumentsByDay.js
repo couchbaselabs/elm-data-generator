@@ -18,40 +18,64 @@ function OnUpdate(doc, meta) {
 
     // Get the keys from the flattened document to use as headers
     const headers = Object.keys(flattenedDoc);
+    // Prepare CSV file
+    let csvHeader = headers.join(",");
+    let csvLine = convertToCsvLine(headers, flattenedDoc);
 
     // Use of distributed atomic counters to increment docCount
-    const docCounter = {"id": dateString};
-    let result = couchbase.increment(metadata_collection, docCounter);
-    let count = 0;
-    if (result.success) {
-        count = result.doc.count;
-    } else {
-        throw new Error(`Failure to atomically increment : ${docCounter.id}, result : ${result}`);
-    }
-    log(`Number of documents for ${dateString}: ${count}`)
+    let count = getAndIncrementCounter(dateString);
 
     // Calculate the chunk number and document ID for the current document
     const chunkNumber = Math.floor(count / MAX_DOCS_PER_AGGREGATE);
     const chunkId = `${dateString}-${chunkNumber}`;
 
-    // Create the document with headers if not already exists
-    let aggregatedCsv = dst_collection[chunkId];
-    if (!aggregatedCsv) {
+    // Append the csv line to the aggregated document
+    append(meta.id, chunkId, csvHeader, csvLine);
+}
+
+function append(id, chunkId, csvHeader, csvLine) {
+    let cas = 0;
+    let aggregatedDoc;
+
+    let result = couchbase.get(dst_collection, {id: chunkId});
+    if (result.success) {
+        aggregatedDoc = result.doc;
+        cas = result.meta.cas;
+    } else {
+        // Create the document with headers if not already exists
         log(`Creating new document with ID: ${chunkId}`);
-        aggregatedCsv = headers.join(",");
+        aggregatedDoc = csvHeader;
     }
 
-    // Convert the flattened document to a CSV line and append it to aggregated document
-    var row = [];
-    for (var i = 0; i < headers.length; i++) {
-        row.push(flattenedDoc[headers[i]]);
-    }
-    let csvDoc = row.join(",");
-    aggregatedCsv = aggregatedCsv + '\n' + csvDoc;
+    // Append to aggregated document
+    aggregatedDoc = aggregatedDoc + '\n' + csvLine;
 
     // Save aggregated document
-    dst_collection[chunkId] = aggregatedCsv;
-    log(`Added document to ${chunkId}`);
+    // If this is the first insertion
+    if (cas === 0) {
+        result = couchbase.insert(dst_collection, {id: chunkId}, aggregatedDoc);
+        if (result.success) {
+            log(`Added '${id}' to '${chunkId}' document`);
+        } else if (result.error.key_already_exists) {
+            // Retry if the document already exists
+            log(`WARN: The document '${chunkId}' has already been inserted, retrying...`)
+            append(id, chunkId, csvHeader, csvLine)
+        } else {
+            error(`Unable to insert document '${chunkId}'`, result)
+        }
+        // If it is an append
+    } else {
+        result = couchbase.replace(dst_collection, {id: chunkId, cas: cas}, aggregatedDoc);
+        if (result.success) {
+            log(`Added '${id}' to '${chunkId}' document`);
+        } else if (result.error.cas_mismatch) {
+            // Retry if the document has already been updated by another process
+            log(`WARN: The document '${chunkId}' has already been updated, retrying...`)
+            append(id, chunkId, csvHeader, csvLine)
+        } else {
+            error(`Unable to replace document '${chunkId}'`, result)
+        }
+    }
 }
 
 // Recursive function to flatten a nested object
@@ -69,4 +93,26 @@ function flattenObject(obj, result, ignorePattern) {
     }
 
     return result;
+}
+
+function getAndIncrementCounter(dateString) {
+    const docCounter = {"id": dateString};
+    let result = couchbase.increment(metadata_collection, docCounter);
+    let count = 0;
+    if (result.success) {
+        count = result.doc.count;
+    } else {
+        throw new Error(`Failure to atomically increment : ${docCounter.id}, result : ${result}`);
+    }
+    log(`Number of documents for ${dateString}: ${count}`)
+    return count;
+}
+
+function convertToCsvLine(headers, doc) {
+    const row = [];
+    for (var i = 0; i < headers.length; i++) {
+        row.push(doc[headers[i]]);
+    }
+    let csvDoc = row.join(",");
+    return csvDoc;
 }
