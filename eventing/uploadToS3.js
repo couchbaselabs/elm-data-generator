@@ -10,7 +10,7 @@ function OnUpdate(doc, meta) {
 
     // read and convert the document to CSV file
     let csv = 'readingId,activityId,assetId,companyId,insertionTime,originalTime,requestTime,sensorStatus,velocity,weight,lat,lon\n' +
-        doc.map(id => origin[id])
+        doc.map(id => origin['ReadingHistory:' + id])
             .filter(r => r !== null)
             .map(r => `${r.readingId},${r.activityId},${r.assetId},${r.companyId},${r.insertionTime},${r.originalTime},${r.requestTime},${r.sensorStatus},${r.velocity},${r.weight},${r.location.r},${r.location.lon}`)
             .join('\n');

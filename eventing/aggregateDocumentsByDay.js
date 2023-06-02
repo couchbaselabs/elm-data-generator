@@ -21,7 +21,7 @@ function OnUpdate(doc, meta) {
     const chunkId = `${dateString}-${chunkNumber}`;
 
     // Append atomically the csv line to the aggregated document
-    updateWithCAS(dst_collection, chunkId, () => [], (d) => d.push(meta.id));
+    updateWithCAS(dst_collection, chunkId, () => [], (d) => d.push(meta.id.replace('ReadingHistory:', '')));
 }
 
 function updateWithCAS(collection, id, init, update) {
