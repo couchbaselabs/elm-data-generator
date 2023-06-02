@@ -8,12 +8,20 @@ function OnUpdate(doc, meta) {
     const year = docIdParts[0];
     const month = docIdParts[1];
 
+    // read and convert the document to CSV file
+    let csv = 'readingId,activityId,assetId,companyId,insertionTime,originalTime,requestTime,sensorStatus,velocity,weight,lat,lon\n' +
+        doc.map(id => origin[id])
+            .filter(r => r !== null)
+            .map(r => `${r.readingId},${r.activityId},${r.assetId},${r.companyId},${r.insertionTime},${r.originalTime},${r.requestTime},${r.sensorStatus},${r.velocity},${r.weight},${r.location.r},${r.location.lon}`)
+            .join('\n');
+
+
     // Compress document
-    let gzipped = gzipSync(encode(doc), {filename: `${meta.id}.csv`}).buffer
+    let gzipped = gzipSync(encode(csv), {filename: `${meta.id}.csv`}).buffer
 
     // Upload to S3
     var request = {
-        path:`/${year}/${month}/${meta.id}.csv.gz`,
+        path: `/${year}/${month}/${meta.id}.csv.gz`,
         body: gzipped,
         headers: {
             'Content-Type': 'application/octet-stream',
@@ -78,7 +86,7 @@ function encode(str) {
     return result;
 }
 
-function gzipSync (data, opts) {
+function gzipSync(data, opts) {
     var u8 = Uint8Array, u16 = Uint16Array, u32 = Uint32Array;
 
     var fleb = new u8([0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0, 0, 0, 0]);
@@ -108,25 +116,47 @@ function gzipSync (data, opts) {
         rev[i] = (((x & 0xFF00) >>> 8) | ((x & 0x00FF) << 8)) >>> 1;
     }
 
-    var bInflt = function () { return [u8, u16, u32, fleb, fdeb, clim, fl, fd, flrm, fdrm, rev, ec, hMap, max, bits, bits16, shft, slc, err, inflt, inflateSync, pbf, gu8]; };
-    var bDflt = function () { return [u8, u16, u32, fleb, fdeb, clim, revfl, revfd, flm, flt, fdm, fdt, rev, deo, et, hMap, wbits, wbits16, hTree, ln, lc, clen, wfblk, wblk, shft, slc, dflt, dopt, deflateSync, pbf]; };
-    var gze = function () { return [gzh, gzhl, wbytes, crc, crct]; };
-    var guze = function () { return [gzs, gzl]; };
-    var zle = function () { return [zlh, wbytes, adler]; };
-    var zule = function () { return [zlv]; };
-    var pbf = function (msg) { return postMessage(msg, [msg.buffer]); };
-    var gu8 = function (o) { return o && o.size && new u8(o.size); };
+    var bInflt = function () {
+        return [u8, u16, u32, fleb, fdeb, clim, fl, fd, flrm, fdrm, rev, ec, hMap, max, bits, bits16, shft, slc, err, inflt, inflateSync, pbf, gu8];
+    };
+    var bDflt = function () {
+        return [u8, u16, u32, fleb, fdeb, clim, revfl, revfd, flm, flt, fdm, fdt, rev, deo, et, hMap, wbits, wbits16, hTree, ln, lc, clen, wfblk, wblk, shft, slc, dflt, dopt, deflateSync, pbf];
+    };
+    var gze = function () {
+        return [gzh, gzhl, wbytes, crc, crct];
+    };
+    var guze = function () {
+        return [gzs, gzl];
+    };
+    var zle = function () {
+        return [zlh, wbytes, adler];
+    };
+    var zule = function () {
+        return [zlv];
+    };
+    var pbf = function (msg) {
+        return postMessage(msg, [msg.buffer]);
+    };
+    var gu8 = function (o) {
+        return o && o.size && new u8(o.size);
+    };
     var cbify = function (dat, opts, fns, init, id, cb) {
         var w = wrkr(fns, init, id, function (err, dat) {
             w.terminate();
             cb(err, dat);
         });
         w.postMessage([dat, opts], opts.consume ? [dat.buffer] : []);
-        return function () { w.terminate(); };
+        return function () {
+            w.terminate();
+        };
     };
     var astrm = function (strm) {
-        strm.ondata = function (dat, final) { return postMessage([dat, final], [dat.buffer]); };
-        return function (ev) { return strm.push(ev.data[0], ev.data[1]); };
+        strm.ondata = function (dat, final) {
+            return postMessage([dat, final], [dat.buffer]);
+        };
+        return function (ev) {
+            return strm.push(ev.data[0], ev.data[1]);
+        };
     };
     var astrmify = function (fns, strm, opts, init, id) {
         var t;
@@ -147,11 +177,19 @@ function gzipSync (data, opts) {
                 strm.ondata(err(4, 0, 1), null, !!f);
             w.postMessage([d, t = f], [d.buffer]);
         };
-        strm.terminate = function () { w.terminate(); };
+        strm.terminate = function () {
+            w.terminate();
+        };
     };
-    var b2 = function (d, b) { return d[b] | (d[b + 1] << 8); };
-    var b4 = function (d, b) { return (d[b] | (d[b + 1] << 8) | (d[b + 2] << 16) | (d[b + 3] << 24)) >>> 0; };
-    var b8 = function (d, b) { return b4(d, b) + (b4(d, b + 4) * 4294967296); };
+    var b2 = function (d, b) {
+        return d[b] | (d[b + 1] << 8);
+    };
+    var b4 = function (d, b) {
+        return (d[b] | (d[b + 1] << 8) | (d[b + 2] << 16) | (d[b + 3] << 24)) >>> 0;
+    };
+    var b8 = function (d, b) {
+        return b4(d, b) + (b4(d, b + 4) * 4294967296);
+    };
     var wbytes = function (d, b, v) {
         for (; v; ++b)
             d[b] = v, v >>>= 8;
@@ -191,7 +229,9 @@ function gzipSync (data, opts) {
         return ((d[l - 4] | d[l - 3] << 8 | d[l - 2] << 16) | (d[l - 1] << 24)) >>> 0;
     };
 
-    var gzhl = function (o) { return 10 + ((o.filename && (o.filename.length + 1)) || 0); };
+    var gzhl = function (o) {
+        return 10 + ((o.filename && (o.filename.length + 1)) || 0);
+    };
     var zlh = function (c, o) {
         var lv = o.level, fl = lv == 0 ? 0 : lv < 6 ? 1 : lv == 9 ? 3 : 2;
         c[0] = 120, c[1] = (fl << 6) | (fl ? (32 - 2 * fl) : 1);
@@ -219,14 +259,15 @@ function gzipSync (data, opts) {
                 }
                 pos = wfblk(w, pos + 1, dat.subarray(i, e));
             }
-        }
-        else {
+        } else {
             var opt = deo[lvl - 1];
             var n = opt >>> 13, c = opt & 8191;
             var msk_1 = (1 << plvl) - 1;
             var prev = new u16(32768), head = new u16(msk_1 + 1);
             var bs1_1 = Math.ceil(plvl / 3), bs2_1 = 2 * bs1_1;
-            var hsh = function (i) { return (dat[i] ^ (dat[i + 1] << bs1_1) ^ (dat[i + 2] << bs2_1)) & msk_1; };
+            var hsh = function (i) {
+                return (dat[i] ^ (dat[i + 1] << bs1_1) ^ (dat[i + 2] << bs2_1)) & msk_1;
+            };
             var syms = new u32(25000);
             var lf = new u16(288), df = new u16(32);
             var lc_1 = 0, eb = 0, i = 0, li = 0, wi = 0, bs = 0;
@@ -282,8 +323,7 @@ function gzipSync (data, opts) {
                         ++df[din];
                         wi = i + l;
                         ++lc_1;
-                    }
-                    else {
+                    } else {
                         syms[li++] = dat[i];
                         ++lf[dat[i]];
                     }
@@ -358,8 +398,7 @@ function gzipSync (data, opts) {
                         wbits(out, p, (clct[i] >>> 5) & 127), p += clct[i] >>> 12;
                 }
             }
-        }
-        else {
+        } else {
             lm = flm, ll = flt, dm = fdm, dl = fdt;
         }
         for (var i = 0; i < li; ++i) {
@@ -372,8 +411,7 @@ function gzipSync (data, opts) {
                 wbits16(out, p, dm[dst]), p += dl[dst];
                 if (dst > 3)
                     wbits16(out, p, (syms[i] >>> 5) & 8191), p += fdeb[dst];
-            }
-            else {
+            } else {
                 wbits16(out, p, lm[syms[i]]), p += ll[syms[i]];
             }
         }
@@ -400,7 +438,7 @@ function gzipSync (data, opts) {
         var t = [];
         for (var i = 0; i < d.length; ++i) {
             if (d[i])
-                t.push({ s: i, f: d[i] });
+                t.push({s: i, f: d[i]});
         }
         var s = t.length;
         var t2 = t.slice();
@@ -411,14 +449,16 @@ function gzipSync (data, opts) {
             v[t[0].s] = 1;
             return [v, 1];
         }
-        t.sort(function (a, b) { return a.f - b.f; });
-        t.push({ s: -1, f: 25001 });
+        t.sort(function (a, b) {
+            return a.f - b.f;
+        });
+        t.push({s: -1, f: 25001});
         var l = t[0], r = t[1], i0 = 0, i1 = 1, i2 = 2;
-        t[0] = { s: -1, f: l.f + r.f, l: l, r: r };
+        t[0] = {s: -1, f: l.f + r.f, l: l, r: r};
         while (i1 != s - 1) {
             l = t[t[i0].f < t[i2].f ? i0++ : i2++];
             r = t[i0 != i1 && t[i0].f < t[i2].f ? i0++ : i2++];
-            t[i1++] = { s: -1, f: l.f + r.f, l: l, r: r };
+            t[i1++] = {s: -1, f: l.f + r.f, l: l, r: r};
         }
         var maxSym = t2[0].s;
         for (var i = 1; i < s; ++i) {
@@ -430,14 +470,15 @@ function gzipSync (data, opts) {
         if (mbt > mb) {
             var i = 0, dt = 0;
             var lft = mbt - mb, cst = 1 << lft;
-            t2.sort(function (a, b) { return tr[b.s] - tr[a.s] || a.f - b.f; });
+            t2.sort(function (a, b) {
+                return tr[b.s] - tr[a.s] || a.f - b.f;
+            });
             for (; i < s; ++i) {
                 var i2_1 = t2[i].s;
                 if (tr[i2_1] > mb) {
                     dt += cst - (1 << (mbt - tr[i2_1]));
                     tr[i2_1] = mb;
-                }
-                else
+                } else
                     break;
             }
             dt >>>= lft;
@@ -472,7 +513,9 @@ function gzipSync (data, opts) {
             ;
         var cl = new u16(++s);
         var cli = 0, cln = c[0], cls = 1;
-        var w = function (v) { cl[cli++] = v; };
+        var w = function (v) {
+            cl[cli++] = v;
+        };
         for (var i = 1; i <= s; ++i) {
             if (c[i] == cln && i != s)
                 ++cls;
@@ -484,8 +527,7 @@ function gzipSync (data, opts) {
                         w(cls > 10 ? ((cls - 11) << 5) | 28690 : ((cls - 3) << 5) | 12305);
                         cls = 0;
                     }
-                }
-                else if (cls > 3) {
+                } else if (cls > 3) {
                     w(cln), --cls;
                     for (; cls > 6; cls -= 6)
                         w(8304);
@@ -527,8 +569,7 @@ function gzipSync (data, opts) {
                     }
                 }
             }
-        }
-        else {
+        } else {
             co = new u16(s);
             for (i = 0; i < s; ++i) {
                 if (cd[i]) {
@@ -594,7 +635,9 @@ function gzipSync (data, opts) {
         return ((d[o] | (d[o + 1] << 8) | (d[o + 2] << 16)) >> (p & 7));
     };
 
-    var shft = function (p) { return ((p + 7) / 8) | 0; };
+    var shft = function (p) {
+        return ((p + 7) / 8) | 0;
+    };
 
     var slc = function (v, s, e) {
         if (s == null || s < 0)
@@ -626,7 +669,9 @@ function gzipSync (data, opts) {
                     cr = crct[(cr & 255) ^ d[i]] ^ (cr >>> 8);
                 c = cr;
             },
-            d: function () { return ~c; }
+            d: function () {
+                return ~c;
+            }
         };
     };
 
@@ -635,7 +680,7 @@ function gzipSync (data, opts) {
     };
 
     const wrapper = {
-        gzipSync: function(data, opts) {
+        gzipSync: function (data, opts) {
             if (!opts)
                 opts = {};
             var c = crc(), l = data.length;
@@ -644,5 +689,5 @@ function gzipSync (data, opts) {
             return gzh(d, opts), wbytes(d, s - 8, c.d()), wbytes(d, s - 4, l), d;
         }
     }
-    return wrapper.gzipSync (data, opts);
+    return wrapper.gzipSync(data, opts);
 }

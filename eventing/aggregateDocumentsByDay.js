@@ -13,22 +13,15 @@ function OnUpdate(doc, meta) {
     const dateString = `${year}-${month}-${day}`;
     //log(`Processing document with date: ${dateString}`)
 
-    // Prepare CSV file
-    let csvHeader = 'readingId,activityId,assetId,companyId,insertionTime,originalTime,requestTime,sensorStatus,velocity,weight,lat,lon';
-    const csvLine = `${doc.readingId},${doc.activityId},${doc.assetId},${doc.companyId},${doc.insertionTime},${doc.originalTime},${doc.requestTime},${doc.sensorStatus},${doc.velocity},${doc.weight},${doc.location.lat},${doc.location.lon}`;
-
     // ⚠️ Increment atomically counter document
-    let count = updateWithCAS(metadata_collection, dateString, () => ({count: 0}), (d) => {
-        d.count++;
-        return d;
-    }).count
+    let count = updateWithCAS(metadata_collection, dateString, () => ({count: 0}), (d) => d.count++).count
 
     // Calculate the chunk number and document ID for the current document
     const chunkNumber = Math.floor(count / MAX_DOCS_PER_AGGREGATE);
     const chunkId = `${dateString}-${chunkNumber}`;
 
     // Append atomically the csv line to the aggregated document
-    updateWithCAS(dst_collection, chunkId, () => csvHeader, (d) => d + '\n' + csvLine);
+    updateWithCAS(dst_collection, chunkId, () => [], (d) => d.push(meta.id));
 }
 
 function updateWithCAS(collection, id, init, update) {
@@ -46,7 +39,7 @@ function updateWithCAS(collection, id, init, update) {
         }
 
         // Update the document
-        doc = update(doc);
+        update(doc);
 
         // Save aggregated document
         // If this is the first insertion
