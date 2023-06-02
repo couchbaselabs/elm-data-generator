@@ -11,16 +11,11 @@ function OnUpdate(doc, meta) {
     const month = (date.getUTCMonth() + 1).toString().padStart(2, "0");
     const day = date.getUTCDate().toString().padStart(2, "0");
     const dateString = `${year}-${month}-${day}`;
-    log(`Processing document with date: ${dateString}`)
+    //log(`Processing document with date: ${dateString}`)
 
-    // Flatten the document
-    let flattenedDoc = flattenObject(doc, {}, /type/);
-
-    // Get the keys from the flattened document to use as headers
-    const headers = Object.keys(flattenedDoc);
     // Prepare CSV file
-    let csvHeader = headers.join(",");
-    let csvLine = convertToCsvLine(headers, flattenedDoc);
+    let csvHeader = 'readingId,activityId,assetId,companyId,insertionTime,originalTime,requestTime,sensorStatus,velocity,weight,lat,lon\n';
+    const csvLine = `${doc.readingId},${doc.activityId},${doc.assetId},${doc.companyId},${doc.insertionTime},${doc.originalTime},${doc.requestTime},${doc.sensorStatus},${doc.velocity},${doc.weight},${doc.location.lat},${doc.location.lon}`;
 
     // Use of distributed atomic counters to increment docCount
     let count = getAndIncrementCounter(dateString);
@@ -34,65 +29,51 @@ function OnUpdate(doc, meta) {
 }
 
 function append(id, chunkId, csvHeader, csvLine) {
-    let cas = 0;
-    let aggregatedDoc;
+    let operationSuccess = false;
+    while (!operationSuccess) {
+        let cas = 0;
+        let aggregatedDoc;
 
-    let result = couchbase.get(dst_collection, {id: chunkId});
-    if (result.success) {
-        aggregatedDoc = result.doc;
-        cas = result.meta.cas;
-    } else {
-        // Create the document with headers if not already exists
-        log(`Creating new document with ID: ${chunkId}`);
-        aggregatedDoc = csvHeader;
-    }
-
-    // Append to aggregated document
-    aggregatedDoc = aggregatedDoc + '\n' + csvLine;
-
-    // Save aggregated document
-    // If this is the first insertion
-    if (cas === 0) {
-        result = couchbase.insert(dst_collection, {id: chunkId}, aggregatedDoc);
+        let result = couchbase.get(dst_collection, {id: chunkId});
         if (result.success) {
-            log(`Added '${id}' to '${chunkId}' document`);
-        } else if (result.error.key_already_exists) {
-            // Retry if the document already exists
-            log(`WARN: The document '${chunkId}' has already been inserted, retrying...`)
-            append(id, chunkId, csvHeader, csvLine)
+            aggregatedDoc = result.doc;
+            cas = result.meta.cas;
         } else {
-            error(`Unable to insert document '${chunkId}'`, result)
+            // Create the document with headers if not already exists
+            log(`Creating new document with ID: ${chunkId}`);
+            aggregatedDoc = csvHeader;
         }
-        // If it is an append
-    } else {
-        result = couchbase.replace(dst_collection, {id: chunkId, cas: cas}, aggregatedDoc);
-        if (result.success) {
-            log(`Added '${id}' to '${chunkId}' document`);
-        } else if (result.error.cas_mismatch) {
-            // Retry if the document has already been updated by another process
-            log(`WARN: The document '${chunkId}' has already been updated, retrying...`)
-            append(id, chunkId, csvHeader, csvLine)
+
+        // Append to aggregated document
+        aggregatedDoc = aggregatedDoc + '\n' + csvLine;
+
+        // Save aggregated document
+        // If this is the first insertion
+        if (cas === 0) {
+            result = couchbase.insert(dst_collection, {id: chunkId}, aggregatedDoc);
+            if (result.success) {
+                operationSuccess = true;
+            } else if (result.error.key_already_exists) {
+                // Retry if the document already exists
+                // log(`WARN: The document '${chunkId}' has already been inserted, retrying...`)
+            } else {
+                log(`ERROR: Unable to insert document '${chunkId}'`, result);
+                break;
+            }
+            // If it is an append
         } else {
-            error(`Unable to replace document '${chunkId}'`, result)
+            result = couchbase.replace(dst_collection, {id: chunkId, cas: cas}, aggregatedDoc);
+            if (result.success) {
+                operationSuccess = true;
+            } else if (result.error.cas_mismatch) {
+                // Retry if the document has already been updated by another process
+                // log(`WARN: The document '${chunkId}' has already been updated, retrying...`)
+            } else {
+                log(`ERROR: Unable to replace document '${chunkId}'`, result)
+                break;
+            }
         }
     }
-}
-
-// Recursive function to flatten a nested object
-function flattenObject(obj, result, ignorePattern) {
-    for (var key in obj) {
-        if (ignorePattern && key.match(ignorePattern)) {
-            continue;
-        }
-
-        if (typeof obj[key] === "object" && !Array.isArray(obj[key])) {
-            flattenObject(obj[key], result, ignorePattern);
-        } else {
-            result[key] = obj[key];
-        }
-    }
-
-    return result;
 }
 
 function getAndIncrementCounter(dateString) {
@@ -104,15 +85,6 @@ function getAndIncrementCounter(dateString) {
     } else {
         throw new Error(`Failure to atomically increment : ${docCounter.id}, result : ${result}`);
     }
-    log(`Number of documents for ${dateString}: ${count}`)
+    //log(`Number of documents for ${dateString}: ${count}`)
     return count;
-}
-
-function convertToCsvLine(headers, doc) {
-    const row = [];
-    for (var i = 0; i < headers.length; i++) {
-        row.push(doc[headers[i]]);
-    }
-    let csvDoc = row.join(",");
-    return csvDoc;
 }
