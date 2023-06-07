@@ -14,77 +14,63 @@ function OnUpdate(doc, meta) {
     //log(`Processing document with date: ${dateString}`)
 
     // Prepare CSV file
-    let csvHeader = 'readingId,activityId,assetId,companyId,insertionTime,originalTime,requestTime,sensorStatus,velocity,weight,lat,lon\n';
+    let csvHeader = 'readingId,activityId,assetId,companyId,insertionTime,originalTime,requestTime,sensorStatus,velocity,weight,lat,lon';
     const csvLine = `${doc.readingId},${doc.activityId},${doc.assetId},${doc.companyId},${doc.insertionTime},${doc.originalTime},${doc.requestTime},${doc.sensorStatus},${doc.velocity},${doc.weight},${doc.location.lat},${doc.location.lon}`;
 
-    // Use of distributed atomic counters to increment docCount
-    let count = getAndIncrementCounter(dateString);
+    // ⚠️ Increment atomically counter document
+    let count = updateWithCAS(metadata_collection, dateString, () => ({count: 0}), (d) => {
+        d.count++;
+        return d;
+    }).count
 
     // Calculate the chunk number and document ID for the current document
     const chunkNumber = Math.floor(count / MAX_DOCS_PER_AGGREGATE);
     const chunkId = `${dateString}-${chunkNumber}`;
 
-    // Append the csv line to the aggregated document
-    append(meta.id, chunkId, csvHeader, csvLine);
+    // Append atomically the csv line to the aggregated document
+    updateWithCAS(dst_collection, chunkId, () => csvHeader, (d) => d + '\n' + csvLine);
 }
 
-function append(id, chunkId, csvHeader, csvLine) {
-    let operationSuccess = false;
-    while (!operationSuccess) {
+function updateWithCAS(collection, id, init, update) {
+    let doc;
+    while (true) {
         let cas = 0;
-        let aggregatedDoc;
 
-        let result = couchbase.get(dst_collection, {id: chunkId});
+        let result = couchbase.get(collection, {id: id});
         if (result.success) {
-            aggregatedDoc = result.doc;
+            doc = result.doc;
             cas = result.meta.cas;
         } else {
-            // Create the document with headers if not already exists
-            log(`Creating new document with ID: ${chunkId}`);
-            aggregatedDoc = csvHeader;
+            log(`Creating new document with ID: ${id}`);
+            doc = init();
         }
 
-        // Append to aggregated document
-        aggregatedDoc = aggregatedDoc + '\n' + csvLine;
+        // Update the document
+        doc = update(doc);
 
         // Save aggregated document
         // If this is the first insertion
         if (cas === 0) {
-            result = couchbase.insert(dst_collection, {id: chunkId}, aggregatedDoc);
+            result = couchbase.insert(collection, {id: id}, doc);
             if (result.success) {
-                operationSuccess = true;
+                return doc;
             } else if (result.error.key_already_exists) {
                 // Retry if the document already exists
                 // log(`WARN: The document '${chunkId}' has already been inserted, retrying...`)
             } else {
-                log(`ERROR: Unable to insert document '${chunkId}'`, result);
-                break;
+                throw new Error(`Unable to insert document '${id}', result : ${result}`);
             }
-            // If it is an append
+            // If it is an update
         } else {
-            result = couchbase.replace(dst_collection, {id: chunkId, cas: cas}, aggregatedDoc);
+            result = couchbase.replace(collection, {id: id, cas: cas}, doc);
             if (result.success) {
-                operationSuccess = true;
+                return doc;
             } else if (result.error.cas_mismatch) {
                 // Retry if the document has already been updated by another process
                 // log(`WARN: The document '${chunkId}' has already been updated, retrying...`)
             } else {
-                log(`ERROR: Unable to replace document '${chunkId}'`, result)
-                break;
+                throw new Error(`Unable to replace document '${id}', result : ${result}`);
             }
         }
     }
-}
-
-function getAndIncrementCounter(dateString) {
-    const docCounter = {"id": dateString};
-    let result = couchbase.increment(metadata_collection, docCounter);
-    let count = 0;
-    if (result.success) {
-        count = result.doc.count;
-    } else {
-        throw new Error(`Failure to atomically increment : ${docCounter.id}, result : ${result}`);
-    }
-    //log(`Number of documents for ${dateString}: ${count}`)
-    return count;
 }
